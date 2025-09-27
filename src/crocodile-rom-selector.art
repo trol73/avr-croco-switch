@@ -1,0 +1,415 @@
+#define CPU "atmega8"
+#define F_CPU   8000000
+
+$output("../firmware.hex")
+
+pin pinLedA = D0
+pin pinLedB = D1
+pin pinLedG = D2
+pin pinLedE = D3
+pin pinLedF = D4
+pin pinLedD = D5
+pin pinLedH = D6
+pin pinLedC = D7
+
+pin pinKeyReset = C0
+pin pinKeyUp = C1
+pin pinKeyDown = C2
+pin pinKey128 = C5
+
+pin pinOutReset = B0
+pin pinBeeper = B1		; OC1A
+pin pinOut128 = B2
+pin pinOutRom0 = B3
+pin pinOutRom1 = B4
+pin pinOutRom2 = B5
+
+use r1 as regZero
+use r2 as regMode
+use r3 as regBeeperDuration
+use r4 as regBeeperFreq
+use r5 as adcSum
+use r6 as adcCnt
+use r7 as magicIgnoreCount
+
+
+#define KEY_UP			0
+#define KEY_DOWN		1
+#define KEY_RESET		2
+#define KEY_128		3
+#define KEY_MAGIC		4
+
+#define TCNT0_VAL						0xb2			; Прерывание переполнения таймера-0 100 Гц
+#define KEY_PRESS_DURATION			7				; Время реакции на нажатие клавиши в сотых долях секунды
+#define KEY_LONG_PRESS_DURATION	150			; Длительность удержания кнопки для сохранения EEPROM
+#define KEY_BEEP_DURATION			3				; Длительность бипа при нажатии кнопок
+#define KEY_BEEP_FREQ				BEEP_F_1000	; Частота звука нажатия кнопок
+#define KEY_LONG_BEEP_DURATION	50				; Длительность бипа при длительном нажатии кнопок
+#define KEY_LONG_BEEP_FREQ			BEEP_F_2000	; Частота звука длительного нажатия кнопок
+#define RESET_PULSE_DURATION 		0x2000		; Длительность подаваемого импусльса сброса при переключении адреса в машинных такатх
+#define ADC_LOW_LIMIT 				0x3e			; ~ 1.2v если напряжение на АЦП кнопки magic ниже этого предела, считаем, что кнопка не подключена
+#define ADC_PRESSED_LIMIT 			0xd0			; ~ 4.0v если  напряжение на АЦП кнопки magic ниже этого  значения, считаем, что кнопка нажата
+#define MAGIC_DOUBLE_PRESS_PREVENT_TIME	100; Для предотвращения ложных срабатываний нажатия Magic
+
+var keyboard_press: byte[5]
+
+#define FLAG_UP_PRESSED				TWAR->TWA0
+#define FLAG_DOWN_PRESSED			TWAR->TWA1
+#define FLAG_RESET_PRESSED			TWAR->TWA2
+#define FLAG_128_PRESSED			TWAR->TWA3
+#define FLAG_MAGIC_PRESSED			TWAR->TWA5
+#define FLAG_SAVE_EPROM				TWAR->TWA6
+
+#define FLAG_MAGIC_DOWN				ACSR->ACIS1
+
+
+#define BEEP_F_500		0x3e
+#define BEEP_F_1000		0x1f
+#define BEEP_F_2000		0x0f
+
+
+#define EEPROM_ADDR_MODE	0xF0
+#define EEPROM_ADDR_128		0xF1
+
+vectors {
+	RESET:			rjmp	main									; External Pin, Power-on Reset, Brown-out Reset and Watchdog Reset
+	TIMER0_OVF:		rjmp	timer0_overflow					; Timer/Counter0 Overflow
+	TIMER1_COMPA:	rjmp	timer1_comp_a						; Timer/Counter1 Compare Match A
+	ADC:				rjmp	adc_done
+}
+
+; Таймер TC0 используется для прерывания опроса клавиатуры и вызывается 100 раз в секунду
+
+proc main() {
+	SPH = r16 = high(RAMEND) ; set stack pointer
+	SPL = r16 = low(RAMEND)
+    
+	regZero = 0
+	DDRB = r16 = bitmask(pinBeeper);, pinOut128, pinOutRom0, pinOutRom1, pinOutRom2)
+	DDRC = regZero
+	DDRD = r16 = 0xff
+	
+	PORTC = r16 = bitmask(pinKeyReset, pinKeyUp, pinKeyDown, pinKey128)
+	
+	pinOutRom0->port = 1
+	pinOutRom1->port = 1
+	pinOutRom2->port = 1
+	pinOut128->port = 1
+	
+	regBeeperDuration = regZero
+	regBeeperFreq = regZero
+
+	
+	; Таймер-0
+	TCCR0 = r16 = bitmask(CS02, CS00)	; делитель на 1024
+	TIMSK = r16 = bitmask(TOIE0)			; включение прерывания по переполнению
+    
+	rcall	eeprom_read_byte(addr: EEPROM_ADDR_MODE)
+	r24 &= 0b111
+	regMode = r24
+	rcall	sendRomAddr
+	
+	rcall	eeprom_read_byte(addr: EEPROM_ADDR_128)
+	if (r24 == 1) {
+		pinOut128->port = 0
+		pinOut128->ddr = 1
+	} else {
+		pinOut128->port = 1
+		pinOut128->ddr = 0
+	}
+	
+	keyboard_press[KEY_UP] = regZero
+	keyboard_press[KEY_DOWN] = regZero
+	keyboard_press[KEY_RESET] = regZero
+	keyboard_press[KEY_128] = regZero
+	keyboard_press[KEY_MAGIC] = regZero
+	
+	adcSum = 0
+	adcCnt = 0
+	magicIgnoreCount = 0
+
+	
+	TWAR = regZero	; KEY_xxx_PRESSED
+	FLAG_SAVE_EPROM = 0
+
+	; настройка АЦП. 7й канал. AVCC с внешним конденсатором на выводе AREF, использовать старшие биты ADCH
+	ADMUX = r16 = bitmask(REFS0, ADLAR, MUX0, MUX1, MUX2)
+	; делитель на 64 (125 КГц), прерывания включены
+	ADCSRA = r16 = bitmask(ADEN, ADSC, ADPS2, ADPS1, ADIE)
+	
+	rcall	showMode
+	
+	sei
+	
+;	rcall	beep(f: BEEP_F_500, duration: 1)
+	
+	loop {
+		mainLoop()
+	}
+}
+
+proc timer0_overflow() {
+	use r16 as tmp
+	saveregs (tmp, SREG) {
+		TCNT0 = tmp = TCNT0_VAL
+		
+		if (!pinKeyUp->pin) {
+			tmp = keyboard_press[KEY_UP]
+			if (++tmp != 0) {
+				keyboard_press[KEY_UP] = tmp
+				if (tmp == KEY_PRESS_DURATION) {
+					FLAG_UP_PRESSED = 1
+				} else if (tmp == KEY_LONG_PRESS_DURATION) {
+					FLAG_SAVE_EPROM = 1
+				}
+			}
+		} else {
+			keyboard_press[KEY_UP] = regZero
+		}
+		
+		if (!pinKeyDown->pin) {
+			tmp = keyboard_press[KEY_DOWN]
+			if (++tmp != 0) {
+				keyboard_press[KEY_DOWN] = tmp
+				if (tmp == KEY_PRESS_DURATION) {
+					FLAG_DOWN_PRESSED = 1
+				} else if (tmp == KEY_LONG_PRESS_DURATION) {
+					FLAG_SAVE_EPROM = 1
+				}
+			}
+		} else {
+			keyboard_press[KEY_DOWN] = regZero
+		}
+		
+		if (!pinKeyReset->pin) {
+			pinOutReset->ddr = 1
+			pinOutReset->port = 0
+			tmp = keyboard_press[KEY_RESET]
+			if (++tmp != 0) {
+				keyboard_press[KEY_RESET] = tmp
+				if (tmp == KEY_PRESS_DURATION) FLAG_RESET_PRESSED = 1
+			}
+		} else {
+			keyboard_press[KEY_RESET] = regZero
+			pinOutReset->ddr = 0
+			pinOutReset->port = 1
+		}
+		
+		if (!pinKey128->pin) {
+			tmp = keyboard_press[KEY_128]
+			if (++tmp != 0) {
+				keyboard_press[KEY_128] = tmp
+				if (tmp == KEY_PRESS_DURATION) {
+					FLAG_128_PRESSED = 1
+				} else if (tmp == KEY_LONG_PRESS_DURATION) {
+					FLAG_SAVE_EPROM = 1
+				}
+			}
+		} else {
+			keyboard_press[KEY_128] = regZero
+		}
+		
+		if (FLAG_MAGIC_DOWN) {
+			tmp = keyboard_press[KEY_MAGIC]
+			if (++tmp != 0) {
+				keyboard_press[KEY_MAGIC] = tmp
+				if (tmp == KEY_PRESS_DURATION && magicIgnoreCount == 0) {
+					FLAG_MAGIC_PRESSED = 1
+					magicIgnoreCount = tmp = MAGIC_DOUBLE_PRESS_PREVENT_TIME
+				}
+			}
+		} else {
+			keyboard_press[KEY_MAGIC] = regZero
+		}
+		
+		if (regBeeperDuration != 0) {
+			regBeeperDuration--
+			if (SREG->Z) {
+				TCCR1A = regZero
+				TCCR1B = regZero
+				TIMSK = tmp = TIMSK & ~bitmask(OCIE1A)
+			}
+		}
+		
+		if (magicIgnoreCount != 0) {
+			magicIgnoreCount--
+		}
+	}
+	reti
+}
+
+
+
+proc timer1_comp_a() {
+	saveregs (r19, r18) {
+		OCR1A = r19.r18 = OCR1A + regZero.regBeeperFreq
+	}
+	reti
+}
+
+proc adc_done() {
+	use r24 as adcVal
+	saveregs (adcVal, SREG) {
+		adcVal = ADCL
+		adcVal = ADCH
+
+		if (adcVal > ADC_LOW_LIMIT) {							; ~ 1.2v
+			if (adcVal < ADC_PRESSED_LIMIT) {						; ~ 4.0v
+				adcSum++
+			}
+			adcCnt++
+			adcVal = adcCnt
+			if (adcVal == 80) {
+				adcVal = adcSum
+				if (adcVal > 40) {
+					FLAG_MAGIC_DOWN = 1
+				} else {
+					FLAG_MAGIC_DOWN = 0
+				}
+				adcVal = 0
+				adcSum = 0
+			}
+		}
+;		prevMagicAdc = adcVal
+	}
+ADCSRA->ADSC = 1
+	reti
+}
+
+inline proc mainLoop() {
+	use r24 as mode
+
+	mode = regMode
+	if (FLAG_UP_PRESSED) {
+		FLAG_UP_PRESSED = 0
+		if (mode < 7) {
+			regMode++
+		} else {
+			regMode = regZero
+		}
+		rcall	beepKey
+		rcall	showMode
+		rcall	sendRomAddr
+	} else if (FLAG_DOWN_PRESSED) {
+		FLAG_DOWN_PRESSED = 0
+		if (mode > 0) {
+			regMode--
+		} else {
+			regMode = mode = 7
+		}
+		rcall	beepKey
+		rcall	showMode
+		rcall	sendRomAddr
+	} else if (FLAG_RESET_PRESSED) {
+		FLAG_RESET_PRESSED = 0
+		rcall	beepKey
+		rcall	sendReset
+	} else if (FLAG_128_PRESSED) {
+		FLAG_128_PRESSED = 0
+		if (pinOut128->port) {
+			pinOut128->port = 0
+			pinOut128->ddr = 1
+		} else {
+			pinOut128->port = 1
+			pinOut128->ddr = 0
+		}
+		rcall	beepKey		
+		rcall	showMode
+	} 
+	if (FLAG_MAGIC_PRESSED) {
+		FLAG_MAGIC_PRESSED = 0
+		rcall	beepKey
+	}
+	if (FLAG_SAVE_EPROM) {
+		FLAG_SAVE_EPROM = 0
+		
+		rcall	beep(f: KEY_LONG_BEEP_FREQ, duration: KEY_LONG_BEEP_DURATION)
+		rcall	eeprom_update_byte(addr: EEPROM_ADDR_MODE, b: regMode)
+		r22 = 0
+		if (!pinOut128->port) r22 = 1
+		rcall	eeprom_update_byte(addr: EEPROM_ADDR_128, b: r22)
+	}
+}
+
+proc eeprom_read_byte(addr: r25.r24) {
+	loop (EECR->EEWE) {}		; Ожидание завершения предыдущей записи
+	EEAR = addr
+	EECR->EERE = 1				; Начать чтение EEPROM
+	r24 = EEDR
+	ret
+}
+
+proc eeprom_update_byte(addr: r25.r24, b: r22) {
+	rcall	eeprom_read_byte(addr)
+	if (r24 == r22) goto exit
+exit:
+	EEDR = r22
+;	r0 = SREG
+	cli
+	EECR->EEMWE = 1
+	EECR->EEWE = 1
+;	SREG = r0
+	sei
+	ret	
+}
+
+proc showMode() {
+	Z = led_codes + regZero.regMode + 1
+	r16 = prg[Z]
+	if (!pinOut128->port) {
+		r16[pinLedH] = 0
+	}
+	PORTD = r16
+	ret
+}
+
+proc beepKey() {
+	r24 = KEY_BEEP_FREQ
+	r25 = KEY_BEEP_DURATION	
+}
+
+proc beep(f: r24, duration: r25) {
+	TCCR1A = r16 = bitmask(COM1A0)
+	TCCR1B = r16 = bitmask(CS12)
+	TCNT1 = regZero.regZero
+	OCR1A = regZero.f
+	regBeeperDuration = duration
+	regBeeperFreq = f
+	TIMSK = r16 = TIMSK | bitmask(OCIE1A)
+	ret
+}
+
+proc sendRomAddr() {
+	pinOutRom0->port = !regMode[0]
+	pinOutRom1->port = !regMode[1]
+	pinOutRom2->port = !regMode[2]
+	pinOutRom0->ddr = regMode[0]
+	pinOutRom1->ddr = regMode[1]
+	pinOutRom2->ddr = regMode[2]
+}
+
+proc sendReset() {
+	pinOutReset->ddr = 1
+	pinOutReset->port = 0
+	loop (r25.r24 = RESET_PULSE_DURATION) {}
+	pinOutReset->port = 1
+	pinOutReset->ddr = 0
+
+	ret
+}
+
+
+
+led_codes: byte[] {
+;    C.DFEGBA
+	0b01000100, ; 0
+	0b01111101, ; 1
+	0b11010000, ; 2
+	0b01011000, ; 3
+	0b01101001, ; 4
+	0b01001010, ; 5
+	0b01000010, ; 6
+	0b01111100, ; 7
+	0b01000000, ; 8
+	0b01001000  ; 9
+}

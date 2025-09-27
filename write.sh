@@ -1,0 +1,1 @@
+avrdude -P usb -c usbasp -p ATmega8 -B 5 -U lfuse:w:0x44:m -U hfuse:w:0xdf:m -U flash:w:firmware.hex
