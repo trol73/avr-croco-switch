@@ -17,3 +17,9 @@
 ## Прошивка
 
 Прошивка написана на языке The Rat: https://trolsoft.ru/soft/the-rat-avr
+
+Фьюзы atmega8:
+
+LOW: 0x44
+
+HIGH: 0xdf
