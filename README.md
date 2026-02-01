@@ -23,3 +23,7 @@
 LOW: 0x04
 
 HIGH: 0xdf
+
+## Модель лицевой панели
+[Лицевая панель для корпуса PowerCool Slim V2](https://github.com/trol73/avr-croco-switch/blob/main/stl/face-panel.stl)
+![Лицевая панель для корпуса PowerCool Slim V2](./stl/face-panel.png)
