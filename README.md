@@ -20,6 +20,6 @@
 
 Фьюзы atmega8:
 
-LOW: 0x44
+LOW: 0x04
 
 HIGH: 0xdf
