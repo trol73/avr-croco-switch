@@ -254,7 +254,7 @@ proc adc_done() {
 		adcVal = ADCH
 
 		if (adcVal > ADC_LOW_LIMIT) {							; ~ 1.2v
-			if (adcVal < ADC_PRESSED_LIMIT) {						; ~ 4.0v
+			if (adcVal < ADC_PRESSED_LIMIT) {				; ~ 4.0v
 				adcSum++
 			}
 			adcCnt++
@@ -354,7 +354,7 @@ exit:
 }
 
 proc showMode() {
-	Z = led_codes + regZero.regMode + 1
+	Z = led_codes + regZero.regMode ;+ 1
 	r16 = prg[Z]
 	if (!pinOut128->port) {
 		r16[pinLedH] = 0
@@ -380,12 +380,18 @@ proc beep(f: r24, duration: r25) {
 }
 
 proc sendRomAddr() {
-	pinOutRom0->port = !regMode[0]
-	pinOutRom1->port = !regMode[1]
-	pinOutRom2->port = !regMode[2]
-	pinOutRom0->ddr = regMode[0]
-	pinOutRom1->ddr = regMode[1]
-	pinOutRom2->ddr = regMode[2]
+;	pinOutRom0->port = !regMode[0]
+;	pinOutRom1->port = !regMode[1]
+;	pinOutRom2->port = !regMode[2]
+;	pinOutRom0->ddr = regMode[0]
+;	pinOutRom1->ddr = regMode[1]
+;	pinOutRom2->ddr = regMode[2]
+	pinOutRom0->port = regMode[0]
+	pinOutRom1->port = regMode[1]
+	pinOutRom2->port = regMode[2]
+	pinOutRom0->ddr = !regMode[0]
+	pinOutRom1->ddr = !regMode[1]
+	pinOutRom2->ddr = !regMode[2]
 }
 
 proc sendReset() {
