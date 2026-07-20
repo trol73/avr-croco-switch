@@ -342,14 +342,13 @@ proc eeprom_read_byte(addr: r25.r24) {
 proc eeprom_update_byte(addr: r25.r24, b: r22) {
 	rcall	eeprom_read_byte(addr)
 	if (r24 == r22) goto exit
-exit:
+
 	EEDR = r22
-;	r0 = SREG
 	cli
 	EECR->EEMWE = 1
 	EECR->EEWE = 1
-;	SREG = r0
 	sei
+exit:	
 	ret	
 }
 
