@@ -12,9 +12,9 @@
 
 ## BOM
 
-[Интерактивный BOM (v1.0](http://htmlpreview.github.io/?https://github.com/trol73/avr-croco-switch/blob/main/bom-v1.0/ibom.html)
+[Интерактивный BOM (v1.0)](http://htmlpreview.github.io/?https://github.com/trol73/avr-croco-switch/blob/main/bom-v1.0/ibom.html)
 
-[Интерактивный BOM (v1.1](http://htmlpreview.github.io/?https://github.com/trol73/avr-croco-switch/blob/main/bom-v1.1/ibom.html)
+[Интерактивный BOM (v1.1)](http://htmlpreview.github.io/?https://github.com/trol73/avr-croco-switch/blob/main/bom-v1.1/ibom.html)
 
 ## Прошивка
 
