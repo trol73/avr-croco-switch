@@ -8,11 +8,12 @@
 ![Вид сзади](./board_bottom.jpg)
 
 ## Схема
-![Схема](./schematic.png)
+![Схема](./schematic-v1.1.png)
 
 ## BOM
 
 [Интерактивный BOM (v1.0](http://htmlpreview.github.io/?https://github.com/trol73/avr-croco-switch/blob/main/bom-v1.0/ibom.html)
+
 [Интерактивный BOM (v1.1](http://htmlpreview.github.io/?https://github.com/trol73/avr-croco-switch/blob/main/bom-v1.1/ibom.html)
 
 ## Прошивка
@@ -27,6 +28,7 @@ HIGH: 0xdf
 
 ## Модель лицевой панели
 [Лицевая панель для корпуса PowerCool Slim V2](https://github.com/trol73/avr-croco-switch/blob/main/models/face-panel.stl)
+
 ![Лицевая панель для корпуса PowerCool Slim V2](./models/face-panel.png)
 
 ## Габариты
